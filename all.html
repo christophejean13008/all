@@ -93,6 +93,13 @@
     .card-oval .oval-thumb{width:42%;}
     .card-oval .oval-title{font-size:1rem;}
   }
+  /* Mode ajustement des miniatures */
+  .edit-toggle{position:fixed;bottom:18px;left:18px;z-index:200;width:38px;height:38px;border-radius:50%;background:rgba(26,45,69,.92);border:1.5px solid rgba(144,224,239,.4);color:var(--accent2);font-size:1.1rem;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 12px rgba(0,0,0,.4);transition:all .2s;backdrop-filter:blur(8px);user-select:none;}
+  .edit-toggle.active{background:var(--accent2);color:#0f1b2d;border-color:var(--accent2);}
+  body.editing .card{pointer-events:none;}
+  body.editing .card .thumb-wrap{cursor:ns-resize!important;pointer-events:all!important;outline:2px dashed rgba(144,224,239,.55);}
+  body.editing .thumb-wrap::before{content:'↕';position:absolute;top:6px;right:8px;z-index:10;color:var(--accent2);font-size:.85rem;pointer-events:none;background:rgba(15,27,45,.75);border-radius:4px;padding:1px 5px;line-height:1.5;}
+  .crop-toast{position:fixed;bottom:68px;left:18px;background:var(--accent4);color:#fff;padding:7px 14px;border-radius:10px;font-size:.78rem;font-weight:700;z-index:300;transition:opacity .3s;pointer-events:none;}
 </style>
 </head>
 <body>
@@ -159,7 +166,7 @@ apps.forEach(function(app) {
 })();
 </script>
 
-<a class="yt-vignette" href="https://www.youtube.com/watch?v=jP4AOnV1pOo" target="_blank" rel="noopener">
+<a class="yt-vignette" href="https://tube-numerique-educatif.apps.education.fr/w/ccfVx7qfqq7y8pjddFEDK3" target="_blank" rel="noopener">
   <span class="yt-label">▶ Présentation &amp; Tutoriel</span>
   <div class="yt-thumb">
     <img id="yt-img" alt="Vidéo Boussole EBEP">
@@ -168,10 +175,22 @@ apps.forEach(function(app) {
 </a>
 <script>
 (function(){
-  const vid='jP4AOnV1pOo', img=document.getElementById('yt-img');
-  const q=['hqdefault','mqdefault','sddefault','default']; let i=0;
-  img.onerror=function(){ if(++i<q.length) img.src='https://img.youtube.com/vi/'+vid+'/'+q[i]+'.jpg'; };
-  img.src='https://img.youtube.com/vi/'+vid+'/'+q[0]+'.jpg';
+  var img = document.getElementById('yt-img');
+  var base = 'https://tube-numerique-educatif.apps.education.fr/lazy-static/';
+  var id = 'ccfVx7qfqq7y8pjddFEDK3';
+  // PeerTube : preview (grande) puis thumbnail (petite)
+  var q = ['previews/', 'thumbnails/'];
+  var i = 0;
+  img.onerror = function() {
+    if (++i < q.length) {
+      img.src = base + q[i] + id + '.jpg';
+    } else {
+      // Fallback : fond sombre avec logo lecture
+      img.style.display = 'none';
+      img.parentElement.style.background = '#0f1b2d';
+    }
+  };
+  img.src = base + q[0] + id + '.jpg';
 })();
 </script>
 
@@ -187,5 +206,85 @@ apps.forEach(function(app) {
 })();
 </script>
 <script data-goatcounter="https://chris333j.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
+<button class="edit-toggle" id="editBtn" title="Ajuster les miniatures">✎</button>
+
+<script>
+/* ── Ajustement du cadrage des miniatures ── */
+const CROP_KEY = '_lthumbCrop';
+let cropPos = {};
+try { cropPos = JSON.parse(localStorage.getItem(CROP_KEY) || '{}'); } catch(e) {}
+
+// Appliquer les positions sauvegardées au chargement
+function applyAllCrops() {
+  document.querySelectorAll('.card').forEach(function(card, i) {
+    if (cropPos[i] !== undefined) {
+      var img = card.querySelector('.thumb');
+      if (img) img.style.objectPosition = 'center ' + cropPos[i] + '%';
+    }
+  });
+}
+applyAllCrops();
+
+// Bouton bascule
+var editBtn = document.getElementById('editBtn');
+var isEditing = false;
+
+editBtn.addEventListener('click', function() {
+  isEditing = !isEditing;
+  document.body.classList.toggle('editing', isEditing);
+  editBtn.classList.toggle('active', isEditing);
+  editBtn.textContent = isEditing ? '✔' : '✎';
+  editBtn.title = isEditing ? 'Enregistrer' : 'Ajuster les miniatures';
+  if (!isEditing) {
+    try { localStorage.setItem(CROP_KEY, JSON.stringify(cropPos)); } catch(e) {}
+    var t = document.createElement('div');
+    t.className = 'crop-toast';
+    t.textContent = 'Positions sauvegardées ✓';
+    document.body.appendChild(t);
+    setTimeout(function() { t.style.opacity = '0'; }, 1600);
+    setTimeout(function() { t.remove(); }, 2000);
+  }
+});
+
+// Glisser pour recadrer
+var drag = null;
+
+function getClientY(e) { return e.touches ? e.touches[0].clientY : e.clientY; }
+
+function startDrag(e) {
+  if (!isEditing) return;
+  var tw = e.target.closest && e.target.closest('.thumb-wrap');
+  if (!tw) return;
+  if (e.cancelable) e.preventDefault();
+  var cards = Array.from(document.querySelectorAll('.card'));
+  var idx = cards.indexOf(tw.closest('.card'));
+  drag = {
+    idx: idx,
+    img: tw.querySelector('.thumb'),
+    startY: getClientY(e),
+    startPct: cropPos[idx] !== undefined ? cropPos[idx] : 0
+  };
+}
+
+function doDrag(e) {
+  if (!drag) return;
+  if (e.cancelable) e.preventDefault();
+  // Glisser vers le haut = montre le bas de l'image (% augmente)
+  var moved = drag.startY - getClientY(e);
+  var pct = Math.max(0, Math.min(100, drag.startPct + moved * 0.45));
+  pct = Math.round(pct);
+  drag.img.style.objectPosition = 'center ' + pct + '%';
+  cropPos[drag.idx] = pct;
+}
+
+function endDrag() { drag = null; }
+
+document.addEventListener('mousedown', startDrag);
+document.addEventListener('touchstart', startDrag, { passive: false });
+document.addEventListener('mousemove', doDrag);
+document.addEventListener('touchmove', doDrag, { passive: false });
+document.addEventListener('mouseup', endDrag);
+document.addEventListener('touchend', endDrag);
+</script>
 </body>
 </html>
